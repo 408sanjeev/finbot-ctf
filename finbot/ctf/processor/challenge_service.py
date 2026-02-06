@@ -67,7 +67,7 @@ class ChallengeService:
 
             # Run detection
             try:
-                result: DetectionResult = detector.check_event(event)
+                result: DetectionResult = detector.check_event(event, db)
                 progress.attempts += 1
                 if progress.first_attempt_at is None:
                     progress.first_attempt_at = datetime.now(UTC)

@@ -8,9 +8,12 @@ indicating a successful prompt injection attack.
 import logging
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from finbot.ctf.detectors.base import BaseDetector
 from finbot.ctf.detectors.registry import register_detector
 from finbot.ctf.detectors.result import DetectionResult
+from finbot.ctf.detectors.utils import extract_context, matches_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -50,26 +53,20 @@ class PromptLeakDetector(BaseDetector):
 
     def get_relevant_event_types(self) -> list[str]:
         """This detector cares about LLM response events"""
-        return [
-            "agent.onboarding_agent.llm_request_success",
-        ]
+        return ["agent.*.llm_request_success"]
 
-    def check_event(self, event: dict[str, Any]) -> DetectionResult:
+    def check_event(self, event: dict[str, Any], db: Session) -> DetectionResult:
+        """Check if LLM response contains system prompt fragments.
+        Only needs the current event, db is unused.
         """
-        Check if LLM response contains system prompt fragments.
-
-        Looks for patterns in:
-        - event.response_dump (raw response)
-        - event.event_data.response (structured response)
-        - event.event_data.content (content field)
-        """
-        # Extract response text from various possible locations
-        response_text = self._extract_response_text(event)
+        response_text = event.get("response_content")
 
         if not response_text:
             return DetectionResult(
                 detected=False, message="No response text found in event"
             )
+
+        response_text = str(response_text)
 
         # Get configuration
         patterns = self.config.get("patterns", self.DEFAULT_PATTERNS)
@@ -78,21 +75,17 @@ class PromptLeakDetector(BaseDetector):
 
         # Check for pattern matches
         matches = []
-        search_text = response_text if case_sensitive else response_text.lower()
-
         for pattern in patterns:
-            search_pattern = pattern if case_sensitive else pattern.lower()
-            if search_pattern in search_text:
-                # Find the actual match for evidence
-                match_start = search_text.find(search_pattern)
-                context_start = max(0, match_start - 50)
-                context_end = min(len(response_text), match_start + len(pattern) + 50)
-                context = response_text[context_start:context_end]
-
+            matched, matched_text = matches_pattern(
+                response_text, pattern, case_sensitive
+            )
+            if matched and matched_text:
+                match_start = response_text.lower().find(matched_text.lower())
+                context = extract_context(response_text, match_start, len(matched_text))
                 matches.append(
                     {
                         "pattern": pattern,
-                        "context": f"...{context}...",
+                        "context": context,
                     }
                 )
 
@@ -125,11 +118,3 @@ class PromptLeakDetector(BaseDetector):
                 "response_length": len(response_text),
             },
         )
-
-    def _extract_response_text(self, event: dict[str, Any]) -> str | None:
-        """Extract response text from event data"""
-
-        if "response_dump" in event:
-            return str(event["response_dump"])
-
-        return None
