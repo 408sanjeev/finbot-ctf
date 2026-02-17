@@ -613,10 +613,6 @@ class CTFEvent(Base):
     llm_model = Column[str](String(100), nullable=True)
     duration_ms = Column[int](Integer, nullable=True)
 
-    # CTF-specific fields (if event triggered challenge/badge)
-    challenge_id = Column[str](String(64), nullable=True)
-    badge_id = Column[str](String(64), nullable=True)
-
     timestamp = Column[datetime](DateTime, default=datetime.now(UTC), index=True)
 
     __table_args__ = (
@@ -651,8 +647,6 @@ class CTFEvent(Base):
             "tool_name": self.tool_name,
             "llm_model": self.llm_model,
             "duration_ms": self.duration_ms,
-            "challenge_id": self.challenge_id,
-            "badge_id": self.badge_id,
             "timestamp": self.timestamp.isoformat().replace("+00:00", "Z"),
         }
 

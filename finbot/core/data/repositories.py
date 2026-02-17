@@ -750,19 +750,71 @@ class CTFEventRepository(NamespacedRepository):
 
         return query.count()
 
-    def get_recent_completions(self, limit: int = 5) -> list[CTFEvent]:
-        """Get recent challenge completions and badge awards"""
-        return (
-            self.db.query(CTFEvent)
+    def get_recent_completions(
+        self, limit: int = 5
+    ) -> list[dict[str, str | int | None]]:
+        """Get recent challenge completions and badge awards from progress/badge tables.
+
+        Returns a merged, time-ordered list of dicts with keys:
+        kind ("challenge" | "badge"), id, title, points, timestamp (ISO).
+        """
+        ns = self.namespace
+        uid = self.session_context.user_id
+
+        completed = (
+            self.db.query(UserChallengeProgress, Challenge)
+            .join(Challenge, UserChallengeProgress.challenge_id == Challenge.id)
             .filter(
-                CTFEvent.namespace == self.namespace,
-                CTFEvent.user_id == self.session_context.user_id,
-                (CTFEvent.challenge_id.isnot(None)) | (CTFEvent.badge_id.isnot(None)),
+                UserChallengeProgress.namespace == ns,
+                UserChallengeProgress.user_id == uid,
+                UserChallengeProgress.status == "completed",
+                UserChallengeProgress.completed_at.isnot(None),
             )
-            .order_by(CTFEvent.timestamp.desc())
+            .order_by(UserChallengeProgress.completed_at.desc())
             .limit(limit)
             .all()
         )
+        badges = (
+            self.db.query(UserBadge, Badge)
+            .join(Badge, UserBadge.badge_id == Badge.id)
+            .filter(
+                UserBadge.namespace == ns,
+                UserBadge.user_id == uid,
+            )
+            .order_by(UserBadge.earned_at.desc())
+            .limit(limit)
+            .all()
+        )
+        items: list[dict[str, str | int | None]] = []
+        for prog, challenge in completed:
+            items.append(
+                {
+                    "kind": "challenge",
+                    "id": prog.challenge_id,
+                    "title": challenge.title,
+                    "points": challenge.points,
+                    "timestamp": prog.completed_at.isoformat().replace("+00:00", "Z")
+                    if prog.completed_at
+                    else None,
+                }
+            )
+        for ub, badge in badges:
+            items.append(
+                {
+                    "kind": "badge",
+                    "id": ub.badge_id,
+                    "title": badge.title,
+                    "points": badge.points,
+                    "timestamp": ub.earned_at.isoformat().replace("+00:00", "Z")
+                    if ub.earned_at
+                    else None,
+                }
+            )
+        items.sort(
+            key=lambda x: x["timestamp"] or "",
+            reverse=True,
+        )
+        return items[:limit]
 
     def get_workflow_events(self, workflow_id: str) -> list[CTFEvent]:
         """Get all events for a specific workflow"""

@@ -383,7 +383,7 @@ class CTFEventProcessor:
             "vendor_id": event.get("vendor_id"),
             "event_category": category,
             "event_type": event.get("event_type", "unknown"),
-            "event_subtype": event.get("subtype"),
+            "event_subtype": event.get("event_subtype"),
             "summary": self._generate_summary(event),
             "details": json.dumps(event),
             "severity": event.get("severity", "info"),

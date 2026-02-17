@@ -27,8 +27,6 @@ class ActivityItem(BaseModel):
     tool_name: str | None
     workflow_id: str | None
     vendor_id: int | None
-    challenge_id: str | None
-    badge_id: str | None
     timestamp: str
 
 
@@ -84,8 +82,6 @@ def get_activity(
             tool_name=e.tool_name,
             workflow_id=e.workflow_id,
             vendor_id=e.vendor_id,
-            challenge_id=e.challenge_id,
-            badge_id=e.badge_id,
             timestamp=e.timestamp.isoformat(),
         )
         for e in events
