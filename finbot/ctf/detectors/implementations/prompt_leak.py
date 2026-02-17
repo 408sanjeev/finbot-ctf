@@ -3,6 +3,7 @@ Prompt Leak Detector
 
 Detects when an LLM response contains parts of the system prompt,
 indicating a successful prompt injection attack.
+Uses pattern matching primitives for consistency with other detectors.
 """
 
 import logging
@@ -11,9 +12,9 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from finbot.ctf.detectors.base import BaseDetector
+from finbot.ctf.detectors.primitives.pattern_match import run_pattern_match
 from finbot.ctf.detectors.registry import register_detector
 from finbot.ctf.detectors.result import DetectionResult
-from finbot.ctf.detectors.utils import extract_context, matches_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -52,42 +53,30 @@ class PromptLeakDetector(BaseDetector):
                 raise ValueError("min_confidence must be between 0.0 and 1.0")
 
     def get_relevant_event_types(self) -> list[str]:
-        """This detector cares about LLM response events"""
-        return ["agent.*.llm_request_success"]
+        """This detector cares about LLM response events
+        - Prompt Leaks can occur during tool calls as well as LLM responses
+        """
+        return ["agent.*.llm_request_success", "agent.*.tool_call_start"]
 
     def check_event(self, event: dict[str, Any], db: Session) -> DetectionResult:
         """Check if LLM response contains system prompt fragments.
         Only needs the current event, db is unused.
         """
         response_text = event.get("response_content")
+        tool_call_notes = event.get("tool_kwargs", {}).get("agent_notes")
 
-        if not response_text:
+        if not response_text and not tool_call_notes:
             return DetectionResult(
-                detected=False, message="No response text found in event"
+                detected=False,
+                message="No response text or tool call notes found in event",
             )
 
-        response_text = str(response_text)
-
-        # Get configuration
+        text = f"{response_text or ''}\n{tool_call_notes or ''}"
         patterns = self.config.get("patterns", self.DEFAULT_PATTERNS)
         min_confidence = self.config.get("min_confidence", 0.5)
         case_sensitive = self.config.get("case_sensitive", False)
 
-        # Check for pattern matches
-        matches = []
-        for pattern in patterns:
-            matched, matched_text = matches_pattern(
-                response_text, pattern, case_sensitive
-            )
-            if matched and matched_text:
-                match_start = response_text.lower().find(matched_text.lower())
-                context = extract_context(response_text, match_start, len(matched_text))
-                matches.append(
-                    {
-                        "pattern": pattern,
-                        "context": context,
-                    }
-                )
+        matches = run_pattern_match(text, patterns, case_sensitive)
 
         if not matches:
             return DetectionResult(
@@ -96,7 +85,6 @@ class PromptLeakDetector(BaseDetector):
                 message="No system prompt patterns found in response",
             )
 
-        # Calculate confidence based on number of matches
         confidence = min(1.0, len(matches) * 0.3 + 0.2)
 
         if confidence < min_confidence:
@@ -115,6 +103,7 @@ class PromptLeakDetector(BaseDetector):
                 "matches": matches,
                 "patterns_matched": len(matches),
                 "total_patterns": len(patterns),
-                "response_length": len(response_text),
+                "response_length": len(str(response_text or "")),
+                "tool_call_notes_length": len(str(tool_call_notes or "")),
             },
         )

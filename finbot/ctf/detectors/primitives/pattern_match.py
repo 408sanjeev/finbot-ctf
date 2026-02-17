@@ -2,9 +2,11 @@
 
 Generic regex/keyword matching on event fields.
 The foundational primitive for text-based detection.
+All pattern-matching helpers live here (no separate utils module).
 """
 
 import logging
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -12,9 +14,101 @@ from sqlalchemy.orm import Session
 from finbot.ctf.detectors.base import BaseDetector
 from finbot.ctf.detectors.registry import register_detector
 from finbot.ctf.detectors.result import DetectionResult
-from finbot.ctf.detectors.utils import extract_context, matches_pattern
 
 logger = logging.getLogger(__name__)
+
+
+def _matches_pattern(
+    text: str,
+    pattern: str,
+    case_sensitive: bool = False,
+    is_regex: bool = False,
+) -> tuple[bool, str | None]:
+    """Check if text matches a pattern. Returns (matched, matched_text)."""
+    if not text or not pattern:
+        return False, None
+
+    if is_regex:
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            match = re.search(pattern, text, flags)
+            if match:
+                return True, match.group(0)
+        except re.error:
+            pass
+
+    search_text = text if case_sensitive else text.lower()
+    search_pattern = pattern if case_sensitive else pattern.lower()
+    if search_pattern in search_text:
+        start = search_text.find(search_pattern)
+        matched = text[start : start + len(pattern)]
+        return True, matched
+    return False, None
+
+
+def _extract_context(
+    text: str, match_start: int, match_length: int, context_chars: int = 50
+) -> str:
+    """Extract context around a match for evidence."""
+    start = max(0, match_start - context_chars)
+    end = min(len(text), match_start + match_length + context_chars)
+    context = text[start:end]
+    if start > 0:
+        context = "..." + context
+    if end < len(text):
+        context = context + "..."
+    return context
+
+
+def _parse_pattern(pattern_config: str | dict) -> tuple[str, bool]:
+    """Parse pattern config into (pattern, is_regex) tuple."""
+    if isinstance(pattern_config, dict):
+        if "regex" in pattern_config:
+            return pattern_config["regex"], True
+        return str(list(pattern_config.values())[0]), False
+    return str(pattern_config), False
+
+
+def run_pattern_match(
+    text: str,
+    patterns: list[str | dict],
+    case_sensitive: bool = False,
+) -> list[dict[str, Any]]:
+    """Run pattern matching against text. Shared logic for pattern-based detectors.
+
+    Args:
+        text: Text to search in.
+        patterns: List of patterns (strings for literal, or dict with 'regex' key).
+        case_sensitive: Whether matching is case-sensitive.
+
+    Returns:
+        List of match dicts with keys: pattern, matched, context, is_regex.
+    """
+    if not text:
+        return []
+
+    matches = []
+    for pattern_config in patterns:
+        pattern, is_regex = _parse_pattern(pattern_config)
+        matched, matched_text = _matches_pattern(
+            text, pattern, case_sensitive, is_regex
+        )
+        if matched and matched_text:
+            match_start = (
+                text.find(matched_text)
+                if case_sensitive
+                else text.lower().find(matched_text.lower())
+            )
+            context = _extract_context(text, match_start, len(matched_text))
+            matches.append(
+                {
+                    "pattern": pattern,
+                    "matched": matched_text,
+                    "context": context,
+                    "is_regex": is_regex,
+                }
+            )
+    return matches
 
 
 @register_detector("PatternMatchDetector")
@@ -67,16 +161,13 @@ class PatternMatchDetector(BaseDetector):
         """Check if event field matches configured patterns.
         Only needs the current event, db is unused.
         """
-
         field = self.config["field"]
         patterns = self.config["patterns"]
         match_mode = self.config.get("match_mode", "any")
         case_sensitive = self.config.get("case_sensitive", False)
         min_matches = self.config.get("min_matches", 1)
 
-        # Extract field value from event
         field_value = event.get(field)
-
         if field_value is None:
             return DetectionResult(
                 detected=False,
@@ -86,31 +177,11 @@ class PatternMatchDetector(BaseDetector):
         if not isinstance(field_value, str):
             field_value = str(field_value)
 
-        # Check patterns
-        matches = []
-        for pattern_config in patterns:
-            pattern, is_regex = self._parse_pattern(pattern_config)
+        matches = run_pattern_match(field_value, patterns, case_sensitive)
 
-            matched, matched_text = matches_pattern(
-                field_value, pattern, case_sensitive, is_regex
-            )
-
-            if matched and matched_text:
-                match_start = field_value.lower().find(matched_text.lower())
-                context = extract_context(field_value, match_start, len(matched_text))
-                matches.append(
-                    {
-                        "pattern": pattern,
-                        "matched": matched_text,
-                        "context": context,
-                        "is_regex": is_regex,
-                    }
-                )
-
-        # Evaluate results based on match_mode
         if match_mode == "all":
             detected = len(matches) == len(patterns)
-        else:  # "any"
+        else:
             detected = len(matches) >= min_matches
 
         if not detected:
@@ -131,13 +202,3 @@ class PatternMatchDetector(BaseDetector):
                 "total_patterns": len(patterns),
             },
         )
-
-    def _parse_pattern(self, pattern_config: str | dict) -> tuple[str, bool]:
-        """Parse pattern config into (pattern, is_regex) tuple."""
-        if isinstance(pattern_config, dict):
-            if "regex" in pattern_config:
-                return pattern_config["regex"], True
-            # Fallback: treat first value as literal
-            return str(list(pattern_config.values())[0]), False
-
-        return str(pattern_config), False

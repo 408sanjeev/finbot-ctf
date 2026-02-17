@@ -1,5 +1,6 @@
 """Base Badge Evaluator"""
 
+import fnmatch
 import logging
 from abc import ABC, abstractmethod
 from typing import Any
@@ -77,14 +78,14 @@ class BaseEvaluator(ABC):
         }
 
     def matches_event_type(self, event_type: str) -> bool:
-        """Check if an event type matches this evaluator's relevant types"""
+        """Check if an event type matches this evaluator's relevant types.
+        Patterns may use '*' to match any sequence of characters (glob-style).
+        """
         relevant = self.get_relevant_event_types()
 
         for pattern in relevant:
-            if pattern.endswith("*"):
-                # Wildcard match
-                prefix = pattern[:-1]
-                if event_type.startswith(prefix):
+            if "*" in pattern:
+                if fnmatch.fnmatch(event_type, pattern):
                     return True
             elif pattern == event_type:
                 return True
