@@ -383,7 +383,7 @@ class CTFEventProcessor:
             "vendor_id": event.get("vendor_id"),
             "event_category": category,
             "event_type": event.get("event_type", "unknown"),
-            "event_subtype": event.get("subtype"),
+            "event_subtype": event.get("event_subtype"),
             "summary": self._generate_summary(event),
             "details": json.dumps(event),
             "severity": event.get("severity", "info"),
@@ -451,12 +451,6 @@ class CTFEventProcessor:
                     badge_id, badge.title, badge.rarity
                 )
                 await ws_manager.send_to_user(namespace, user_id, ws_event)
-
-    def reload_definitions(self):
-        """Reload detector and evaluator caches"""
-        self.challenge_service.clear_cache()
-        self.badge_service.clear_cache()
-        logger.info("CTF processor caches cleared")
 
 
 # Singleton instance

@@ -125,30 +125,6 @@ class UserSession(Base):
         }
 
 
-class UserActivity(Base):
-    """User Activity Model
-    - Useful for auditing, compliance and CTF purposes
-    """
-
-    __tablename__ = "user_activities"
-
-    id = Column[int](Integer, primary_key=True)
-    namespace = Column[str](String(64), nullable=False, index=True)
-
-    # activity data
-    user_id = Column[str](String(32), nullable=False)
-    activity_type = Column[str](String(100), nullable=False)
-    description = Column[str](Text, nullable=True)
-    activity_metadata = Column[str](Text, nullable=True)  # JSON
-
-    created_at = Column[datetime](DateTime, default=datetime.now(UTC))
-    __table_args__ = (
-        Index("idx_activities_namespace", "namespace"),
-        Index("idx_activities_namespace_user", "namespace", "user_id"),
-        Index("idx_activities_namespace_type", "namespace", "activity_type"),
-    )
-
-
 class MagicLinkToken(Base):
     """Magic Link Token for password-less authentication"""
 
@@ -637,10 +613,6 @@ class CTFEvent(Base):
     llm_model = Column[str](String(100), nullable=True)
     duration_ms = Column[int](Integer, nullable=True)
 
-    # CTF-specific fields (if event triggered challenge/badge)
-    challenge_id = Column[str](String(64), nullable=True)
-    badge_id = Column[str](String(64), nullable=True)
-
     timestamp = Column[datetime](DateTime, default=datetime.now(UTC), index=True)
 
     __table_args__ = (
@@ -675,8 +647,6 @@ class CTFEvent(Base):
             "tool_name": self.tool_name,
             "llm_model": self.llm_model,
             "duration_ms": self.duration_ms,
-            "challenge_id": self.challenge_id,
-            "badge_id": self.badge_id,
             "timestamp": self.timestamp.isoformat().replace("+00:00", "Z"),
         }
 

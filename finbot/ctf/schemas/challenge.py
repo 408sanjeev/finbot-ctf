@@ -25,6 +25,7 @@ class LabelsSchema(BaseModel):
     owasp_llm: list[str] = Field(default_factory=list)
     cwe: list[str] = Field(default_factory=list)
     mitre_atlas: list[str] = Field(default_factory=list)
+    owasp_agentic: list[str] = Field(default_factory=list)
 
 
 class ChallengeSchema(BaseModel):
