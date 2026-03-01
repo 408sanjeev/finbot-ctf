@@ -178,9 +178,12 @@ class CTFSidecar {
             return;
         }
 
+        const rarityIcons = { common: '⭐', rare: '💎', epic: '🌟', legendary: '👑' };
+
         grid.innerHTML = badges.map(badge => `
             <div class="ctf-badge-item rarity-${badge.rarity}" title="${badge.title}">
-                <img src="static/images/ctf/badges/${badge.icon_url}" alt="${badge.title}" class="w-6 h-6">
+                <img src="static/images/ctf/badges/${badge.icon_url}" alt="${badge.title}" class="w-6 h-6"
+                     onerror="this.replaceWith(Object.assign(document.createElement('span'), { textContent: '${rarityIcons[badge.rarity] || '🏅'}', className: 'text-lg' }))">
             </div>
         `).join('');
     }
