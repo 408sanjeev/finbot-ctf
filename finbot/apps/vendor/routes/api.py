@@ -10,7 +10,11 @@ from finbot.agents.runner import run_invoice_agent, run_onboarding_agent
 from finbot.core.auth.middleware import get_session_context
 from finbot.core.auth.session import SessionContext
 from finbot.core.data.database import get_db
-from finbot.core.data.repositories import InvoiceRepository, VendorRepository
+from finbot.core.data.repositories import (
+    InvoiceRepository,
+    VendorMessageRepository,
+    VendorRepository,
+)
 from finbot.core.messaging import event_bus
 
 # Create API router
@@ -684,3 +688,97 @@ async def reprocess_invoice(
         "message": "Invoice re-processing has been queued. The AI agent will review it shortly.",
         "workflow_id": workflow_id,
     }
+
+
+# =============================================================================
+# Message endpoints (vendor-scoped)
+# =============================================================================
+
+
+@router.get("/messages")
+async def get_messages(
+    message_type: str | None = None,
+    is_read: bool | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    session_context: SessionContext = Depends(get_session_context),
+):
+    """Get messages for current vendor"""
+    db = next(get_db())
+    msg_repo = VendorMessageRepository(db, session_context)
+
+    messages = msg_repo.list_messages_for_current_vendor(
+        message_type=message_type,
+        is_read=is_read,
+        limit=limit,
+        offset=offset,
+    )
+    stats = msg_repo.get_message_stats_for_current_vendor()
+
+    return {
+        "messages": [m.to_dict() for m in messages],
+        "stats": stats,
+        "vendor_context": session_context.current_vendor,
+    }
+
+
+@router.get("/messages/stats")
+async def get_message_stats(
+    session_context: SessionContext = Depends(get_session_context),
+):
+    """Get message stats for current vendor (unread count, type breakdown)"""
+    db = next(get_db())
+    msg_repo = VendorMessageRepository(db, session_context)
+
+    return msg_repo.get_message_stats_for_current_vendor()
+
+
+@router.get("/messages/{message_id}")
+async def get_message(
+    message_id: int,
+    session_context: SessionContext = Depends(get_session_context),
+):
+    """Get a specific message"""
+    db = next(get_db())
+    msg_repo = VendorMessageRepository(db, session_context)
+
+    msg = msg_repo.get_message(message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if msg.vendor_id != session_context.current_vendor_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return {"message": msg.to_dict()}
+
+
+@router.post("/messages/{message_id}/read")
+async def mark_message_read(
+    message_id: int,
+    session_context: SessionContext = Depends(get_session_context),
+):
+    """Mark a message as read"""
+    db = next(get_db())
+    msg_repo = VendorMessageRepository(db, session_context)
+
+    msg = msg_repo.get_message(message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if msg.vendor_id != session_context.current_vendor_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    msg = msg_repo.mark_as_read(message_id)
+    return {"success": True, "message": msg.to_dict()}
+
+
+@router.post("/messages/read-all")
+async def mark_all_messages_read(
+    session_context: SessionContext = Depends(get_session_context),
+):
+    """Mark all messages as read for current vendor"""
+    db = next(get_db())
+    msg_repo = VendorMessageRepository(db, session_context)
+
+    count = msg_repo.mark_all_as_read()
+    return {"success": True, "messages_updated": count}
