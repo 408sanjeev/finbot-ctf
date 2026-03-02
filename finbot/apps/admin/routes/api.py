@@ -14,6 +14,7 @@ from finbot.core.data.repositories import (
     MCPServerConfigRepository,
 )
 from finbot.mcp.servers.finstripe.server import DEFAULT_CONFIG as FINSTRIPE_DEFAULTS
+from finbot.mcp.servers.taxcalc.server import DEFAULT_CONFIG as TAXCALC_DEFAULTS
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +38,11 @@ MCP_SERVER_DEFAULTS = {
     },
     "taxcalc": {
         "display_name": "TaxCalc",
-        "enabled": False,
-        "config": {},
-        "description": "Mock tax calculator for tax rate lookups and validation. (Phase 3)",
+        "enabled": True,
+        "config": {
+            **TAXCALC_DEFAULTS,
+        },
+        "description": "Mock tax calculator for tax rate lookups, calculations, and TIN validation.",
     },
 }
 
@@ -66,10 +69,18 @@ async def list_mcp_servers(
     repo = MCPServerConfigRepository(db, session_context)
 
     configs = repo.list_all()
-    existing_types = {c.server_type for c in configs}
+    existing = {c.server_type: c for c in configs}
 
     for server_type, defaults in MCP_SERVER_DEFAULTS.items():
-        if server_type not in existing_types:
+        existing_config = existing.get(server_type)
+        if not existing_config:
+            repo.upsert(
+                server_type=server_type,
+                display_name=defaults["display_name"],
+                enabled=defaults["enabled"],
+                config_json=json.dumps(defaults["config"]),
+            )
+        elif not existing_config.get_config() and defaults.get("config"):
             repo.upsert(
                 server_type=server_type,
                 display_name=defaults["display_name"],
@@ -230,41 +241,54 @@ async def list_mcp_activity(
 # =============================================================================
 
 
+def _make_dummy_session_context():
+    """Create a minimal SessionContext for server introspection."""
+    from datetime import UTC, datetime
+
+    from finbot.core.auth.session import SessionContext as SC
+
+    return SC(
+        session_id="",
+        user_id="",
+        namespace="__introspect__",
+        is_temporary=True,
+        csrf_token="",
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC),
+    )
+
+
+_SERVER_INTROSPECTORS = {
+    "finstripe": "finbot.mcp.servers.finstripe.server.create_finstripe_server",
+    "taxcalc": "finbot.mcp.servers.taxcalc.server.create_taxcalc_server",
+}
+
+
 async def _get_default_tool_definitions(server_type: str) -> list[dict]:
     """Get the default tool definitions for a server type by introspecting the FastMCP server."""
-    if server_type == "finstripe":
-        try:
-            # pylint: disable=import-outside-toplevel
-            from datetime import UTC, datetime
+    factory_path = _SERVER_INTROSPECTORS.get(server_type)
+    if not factory_path:
+        return []
 
-            # pylint: disable=reimported
-            from finbot.core.auth.session import SessionContext as SC
+    try:
+        import importlib
 
-            dummy_ctx = SC(
-                session_id="",
-                user_id="",
-                namespace="__introspect__",
-                is_temporary=True,
-                csrf_token="",
-                created_at=datetime.now(UTC),
-                expires_at=datetime.now(UTC),
-            )
-            from finbot.mcp.servers.finstripe.server import create_finstripe_server
+        module_path, func_name = factory_path.rsplit(".", 1)
+        module = importlib.import_module(module_path)
+        factory_fn = getattr(module, func_name)
 
-            server = create_finstripe_server(dummy_ctx)
-            server_tools = await server.list_tools()
-            tools = []
-            for tool in server_tools:
-                tools.append(
-                    {
-                        "name": tool.name,
-                        "description": tool.description or "",
-                        "parameters": tool.parameters
-                        if hasattr(tool, "parameters")
-                        else {},
-                    }
-                )
-            return tools
-        except Exception:  # pylint: disable=broad-exception-caught
-            logger.debug("Failed to introspect FinStripe tools", exc_info=True)
+        dummy_ctx = _make_dummy_session_context()
+        server = factory_fn(dummy_ctx)
+        server_tools = await server.list_tools()
+
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description or "",
+                "parameters": tool.parameters if hasattr(tool, "parameters") else {},
+            }
+            for tool in server_tools
+        ]
+    except Exception:
+        logger.debug("Failed to introspect %s tools", server_type, exc_info=True)
     return []

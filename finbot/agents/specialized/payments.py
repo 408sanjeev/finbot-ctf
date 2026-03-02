@@ -74,11 +74,14 @@ class PaymentsAgent(BaseAgent):
         return result
 
     async def _get_mcp_servers(self) -> dict[str, FastMCP | str]:
-        """Connect to FinStripe MCP server for payment transfer execution."""
+        """Connect to FinStripe and TaxCalc MCP servers."""
         servers: dict[str, FastMCP | str] = {}
         finstripe = await create_mcp_server("finstripe", self.session_context)
         if finstripe:
             servers["finstripe"] = finstripe
+        taxcalc = await create_mcp_server("taxcalc", self.session_context)
+        if taxcalc:
+            servers["taxcalc"] = taxcalc
         return servers
 
     def _get_system_prompt(self) -> str:
@@ -163,6 +166,7 @@ class PaymentsAgent(BaseAgent):
           - Always start by getting invoice details for payment if you do not have them already
           - Verify the invoice is approved and eligible for payment
           - Check vendor status and banking details
+          - If tax calculation tools are available (taxcalc__calculate_tax), verify applicable tax for the invoice amount
           - Execute the fund transfer via FinStripe before marking the invoice as paid
           - For payment summary requests, use the vendor payment summary tool
           - Provide clear reasoning for all decisions

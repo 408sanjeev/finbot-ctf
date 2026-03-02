@@ -75,14 +75,25 @@ function renderConfig(server) {
 
     let configFieldsHtml = '';
     for (const [key, value] of Object.entries(config)) {
-        const type = typeof value === 'number' ? 'number' : 'text';
-        configFieldsHtml += `
-            <div class="flex items-center justify-between py-2">
-                <label class="text-sm text-text-secondary font-medium">${esc(key)}</label>
-                <input type="${type}" name="config-${key}" value="${esc(String(value))}"
-                    class="config-input w-48 text-right" data-config-key="${esc(key)}">
-            </div>
-        `;
+        if (typeof value === 'object' && value !== null) {
+            const jsonStr = JSON.stringify(value, null, 2);
+            configFieldsHtml += `
+                <div class="py-3">
+                    <label class="text-sm text-text-secondary font-medium block mb-2">${esc(key)}</label>
+                    <textarea class="tool-textarea config-json-input" data-config-key="${esc(key)}"
+                        rows="${Math.min(Math.max(jsonStr.split('\n').length, 3), 12)}">${esc(jsonStr)}</textarea>
+                </div>
+            `;
+        } else {
+            const type = typeof value === 'number' ? 'number' : 'text';
+            configFieldsHtml += `
+                <div class="flex items-center justify-between py-2">
+                    <label class="text-sm text-text-secondary font-medium">${esc(key)}</label>
+                    <input type="${type}" name="config-${key}" value="${esc(String(value))}"
+                        class="config-input w-48 text-right" data-config-key="${esc(key)}">
+                </div>
+            `;
+        }
     }
 
     let toolsHtml = '';
@@ -237,11 +248,25 @@ function attachConfigHandlers(serverType) {
 async function saveConfig(serverType) {
     const inputs = document.querySelectorAll('[data-config-key]');
     const config = {};
+    let parseError = null;
     inputs.forEach(input => {
         const key = input.dataset.configKey;
-        const value = input.type === 'number' ? parseFloat(input.value) : input.value;
-        config[key] = value;
+        if (input.classList.contains('config-json-input')) {
+            try {
+                config[key] = JSON.parse(input.value);
+            } catch (e) {
+                parseError = `Invalid JSON in "${key}": ${e.message}`;
+            }
+        } else {
+            const value = input.type === 'number' ? parseFloat(input.value) : input.value;
+            config[key] = value;
+        }
     });
+
+    if (parseError) {
+        alert(parseError);
+        return;
+    }
 
     try {
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;

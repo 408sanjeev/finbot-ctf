@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # Registry of server creation functions
 _SERVER_FACTORIES: dict[str, Any] = {
     "finstripe": "finbot.mcp.servers.finstripe.server.create_finstripe_server",
+    "taxcalc": "finbot.mcp.servers.taxcalc.server.create_taxcalc_server",
 }
 
 
