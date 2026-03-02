@@ -4,6 +4,7 @@ import secrets
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from finbot.agents.runner import run_orchestrator_agent
@@ -11,6 +12,7 @@ from finbot.core.auth.middleware import get_session_context
 from finbot.core.auth.session import SessionContext
 from finbot.core.data.database import get_db
 from finbot.core.data.repositories import (
+    ChatMessageRepository,
     InvoiceRepository,
     VendorMessageRepository,
     VendorRepository,
@@ -778,3 +780,61 @@ async def mark_all_messages_read(
 
     count = msg_repo.mark_all_as_read()
     return {"success": True, "messages_updated": count}
+
+
+# =============================================================================
+# Chat Assistant endpoints
+# =============================================================================
+
+
+class ChatRequest(BaseModel):
+    """Chat message request"""
+
+    message: str
+
+
+@router.post("/chat")
+async def chat(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    session_context: SessionContext = Depends(get_session_context),
+):
+    """Stream a chat response from the AI assistant"""
+    from finbot.agents.chat import ChatAssistant  # pylint: disable=import-outside-toplevel
+
+    assistant = ChatAssistant(
+        session_context=session_context,
+        background_tasks=background_tasks,
+    )
+
+    return StreamingResponse(
+        assistant.stream_response(request.message),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/chat/history")
+async def get_chat_history(
+    limit: int = 100,
+    session_context: SessionContext = Depends(get_session_context),
+):
+    """Get chat history for the current user and vendor"""
+    db = next(get_db())
+    repo = ChatMessageRepository(db, session_context)
+    messages = repo.get_history(limit=limit)
+    return {"messages": [m.to_dict() for m in messages]}
+
+
+@router.delete("/chat/history")
+async def clear_chat_history(
+    session_context: SessionContext = Depends(get_session_context),
+):
+    """Clear chat history for the current user and vendor"""
+    db = next(get_db())
+    repo = ChatMessageRepository(db, session_context)
+    count = repo.clear_history()
+    return {"success": True, "messages_deleted": count}

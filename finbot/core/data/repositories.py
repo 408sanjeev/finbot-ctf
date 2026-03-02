@@ -10,6 +10,7 @@ from finbot.core.auth.session import SessionContext
 from finbot.core.data.models import (
     Badge,
     Challenge,
+    ChatMessage,
     CTFEvent,
     Invoice,
     UserBadge,
@@ -538,6 +539,68 @@ class VendorMessageRepository(NamespacedRepository):
 # =============================================================================
 # CTF Repositories
 # =============================================================================
+
+# =============================================================================
+# Chat Message Repository
+# =============================================================================
+
+
+class ChatMessageRepository(NamespacedRepository):
+    """Repository for ChatMessage -- scoped to current user + vendor."""
+
+    def __init__(self, db: Session, session_context: SessionContext):
+        super().__init__(db, session_context)
+        self.user_id = session_context.user_id
+        self.vendor_id = session_context.current_vendor_id
+
+    def add_message(
+        self,
+        role: str,
+        content: str,
+        workflow_id: str | None = None,
+    ) -> "ChatMessage":
+        msg = ChatMessage(
+            namespace=self.namespace,
+            user_id=self.user_id,
+            vendor_id=self.vendor_id,
+            role=role,
+            content=content,
+            workflow_id=workflow_id,
+        )
+        self.db.add(msg)
+        self.db.commit()
+        self.db.refresh(msg)
+        return msg
+
+    def get_history(self, limit: int = 100) -> list["ChatMessage"]:
+        query = (
+            self._add_namespace_filter(self.db.query(ChatMessage), ChatMessage)
+            .filter(ChatMessage.user_id == self.user_id)
+            .filter(ChatMessage.cleared_at.is_(None))
+        )
+        if self.vendor_id:
+            query = query.filter(ChatMessage.vendor_id == self.vendor_id)
+
+        return (
+            query.order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+            .limit(limit)
+            .all()
+        )[::-1]  # reverse to chronological order
+
+    def clear_history(self) -> int:
+        now = datetime.now(UTC)
+        query = (
+            self._add_namespace_filter(self.db.query(ChatMessage), ChatMessage)
+            .filter(ChatMessage.user_id == self.user_id)
+            .filter(ChatMessage.cleared_at.is_(None))
+        )
+        if self.vendor_id:
+            query = query.filter(ChatMessage.vendor_id == self.vendor_id)
+
+        count = query.update({"cleared_at": now})
+        self.db.commit()
+        return count
+
 
 # =============================================================================
 # Challenge Repository

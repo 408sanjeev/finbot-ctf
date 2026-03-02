@@ -382,6 +382,43 @@ class VendorMessage(Base):
         }
 
 
+# Chat Messages
+
+
+class ChatMessage(Base):
+    """Messages exchanged between vendors and the AI chat assistant"""
+
+    __tablename__ = "chat_messages"
+
+    id = Column[int](Integer, primary_key=True, autoincrement=True)
+    namespace = Column[str](String(64), nullable=False)
+    user_id = Column[str](String(32), nullable=False)
+    vendor_id = Column[int](Integer, ForeignKey("vendors.id"), nullable=True)
+    role = Column[str](String(20), nullable=False)  # "user", "assistant", "system"
+    content = Column[str](Text, nullable=False)
+    workflow_id = Column[str](String(64), nullable=True)
+    created_at = Column[datetime](DateTime, default=datetime.now(UTC))
+    cleared_at = Column[datetime](DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("idx_chat_ns_user_vendor_ts", "namespace", "user_id", "vendor_id", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChatMessage(id={self.id}, role='{self.role}', user_id='{self.user_id[:8]}')>"
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "role": self.role,
+            "content": self.content,
+            "workflow_id": self.workflow_id,
+            "created_at": self.created_at.isoformat().replace("+00:00", "Z")
+            if self.created_at
+            else None,
+        }
+
+
 # Admin Portal
 
 # CTF Models
